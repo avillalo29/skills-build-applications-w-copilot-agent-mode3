@@ -28,20 +28,21 @@ OctoFit Tracker is a three-tier application for a school fitness program. The st
 
 ## Implementation decisions
 
-- Presentation tier: Keep API URL construction and fetch behavior in the shared client. Each capability component renders its own API-backed content and accessible loading, empty, success, and error states; do not move business rules into React.
-- Logic tier: Implement behavior in explicit service functions, with routes limited to translating HTTP requests into service calls and deliberate responses. Validate request data and references before database writes so malformed IDs and missing records produce 4xx responses rather than cast errors.
-- Data tier: Enforce required fields and sensible constraints in Mongoose schemas. Keep persistence in models/services and use the shared database configuration. The seed script must remain idempotent, use upserts for stable demo records, and preserve unrelated user data.
-- Activity tracking: Accept `userId`, `teamId`, `type`, and positive `minutes`; validate ID shape and existence of both references before creating an activity. Store the corresponding user/team references, compute points from minutes, and set `occurredAt` when creating the record.
-- Team management: List teams with their submitted names, mascots, and members. Creation requires a non-empty name and preserves the accepted team fields and member references.
-- Leaderboard: Aggregate activity points per team, order entries by total points descending, and assign ranks starting at 1.
-- Workout suggestions: Find the requested user by email; return a deliberate 4xx if no user matches. Recommend available workouts aligned with the user's fitness goal or recent activity, and include a human-readable reason for the first recommendation.
+- **Presentation tier:** Keep API URL construction and fetch/error handling in `frontend/src/api/client.ts`. Capability pages call the shared client and render semantic headings/lists plus accessible loading (`role="status"`), error (`role="alert"`), empty, and populated states. Pages display server-provided results; they do not calculate points, rankings, or workout relevance.
+- **Logic tier:** Keep HTTP handlers in `backend/src/routes/api.ts` thin: invoke service functions, select the success status/body, and forward errors to the app error handler. Services own input validation, reference lookups, point calculation, leaderboard ordering, and workout matching. Invalid request fields or malformed IDs return `400`; well-formed IDs that reference missing records and unknown user emails return `404`; database cast errors must not be used as request validation.
+- **Data tier:** Mongoose schemas require user identity and fitness goal, team name and mascot, all activity fields, and workout title/focus/duration/difficulty. Names and string fields are trimmed; email is normalized to lowercase; minutes must be positive; a team's members default to an empty array. Activity creation explicitly sets `occurredAt`. Persistence uses the shared database configuration. The seed script uses stable upserts, removes a demo user's old team membership when moving that fixture, and never clears unrelated records.
+- **Activity tracking:** Accept `userId`, `teamId`, `type`, and positive finite `minutes`. Check 24-character hexadecimal ID shape before querying, then confirm that both the user and team exist. Store the matching references and trimmed activity type; use minutes as the points value and set the creation timestamp.
+- **Team management:** Return each team's name, mascot, and member references. Creation rejects an empty name or mascot, validates member ID shapes and existence, and preserves the accepted fields without silently dropping invalid references.
+- **Leaderboard:** Sum activity points for each team, include teams with no activity at zero points, sort by total points descending (team name breaks ties deterministically), then assign 1-based sequential ranks.
+- **Workout suggestions:** Resolve the requested email case-insensitively and return `404` when no user matches. Prefer workouts matching the user's goal and latest activity focus, using activity-type-to-focus matching for common endurance, strength, and mobility activities. Return a human-readable reason with every suggestion and rank matching workouts before other available workouts.
+- **Security and scope:** The API remains unauthenticated for this exercise. Do not add authentication; it remains a follow-up challenge.
 
 ## Test plan
 
-Run tests in dependency order: data contracts, API contracts, then frontend contracts. A failure indicates a contract gap in that tier (or a lower tier it depends on); run both builds after the tests pass to catch TypeScript and bundling errors.
+Run the contract suites in dependency order: data, API, then frontend. A lower-tier failure can invalidate a higher-tier result, so fix and rerun the earliest failing tier first. Once all contracts pass, run both builds to catch backend TypeScript and frontend TypeScript/bundling errors.
 
-- Data tier — `npm run test:data --prefix octofit-tracker/backend`: **run; currently fails 4 of 5 tests.** User, team, activity, and workout schema validation is missing; the seed/idempotency test passes.
-- API — `npm run test:api --prefix octofit-tracker/backend`: **run; currently fails all 4 tests.** Activity and team creation return `501` instead of validating input, the leaderboard is empty, and workout suggestions lack the expected reason/matching behavior.
-- Frontend — `npm test --prefix octofit-tracker/frontend`: **run; currently fails all 15 tests.** Capability pages remain placeholders and do not render API data or the required loading, empty, and error states.
-- Backend build — `npm run build --prefix octofit-tracker/backend`: run after the backend contracts pass; a failure indicates a backend TypeScript compilation error. **Not run yet.**
-- Frontend build — `npm run build --prefix octofit-tracker/frontend`: run after the frontend contract passes; a failure indicates a TypeScript or Vite production-build error. **Not run yet.**
+- Data tier — `npm run test:data --prefix octofit-tracker/backend`: checks schema requirements and seed idempotency/data preservation. **Latest run: passed, 5/5 tests.**
+- API — `npm run test:api --prefix octofit-tracker/backend`: checks activity/team validation and creation, leaderboard totals/ranks, and user-specific workout suggestions. **Latest run: passed, 4/4 tests.**
+- Frontend — `npm test --prefix octofit-tracker/frontend`: checks API-backed capability content and accessible loading, empty, and error states. **Latest run: passed, 15/15 tests.**
+- Backend build — `npm run build --prefix octofit-tracker/backend`: TypeScript compile check. **Latest run: passed.**
+- Frontend build — `npm run build --prefix octofit-tracker/frontend`: TypeScript compile check and Vite production bundle. **Latest run: passed.**
